@@ -1,9 +1,13 @@
 name: Build and Release
 
+# CHANGE 1: This is the new manual trigger
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'The version tag to create (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
 
 permissions:
   contents: write
@@ -21,8 +25,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref_name }}
+          # CHANGE 2: Use the input version instead of the git tag
+          tag_name: ${{ inputs.version }}
+          release_name: Release ${{ inputs.version }}
           body: |
             Automated release of the web server wrapper.
             Download the appropriate binary for your platform.
@@ -31,11 +36,10 @@ jobs:
 
   build-and-upload:
     name: Build and Upload
-    needs: create_release # This job runs after create_release is done
+    needs: create_release
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # Define the architectures to build for
         goos: [linux, windows, darwin]
         goarch: [amd64, arm64]
         exclude:
@@ -44,6 +48,7 @@ jobs:
 
     steps:
       - name: Checkout code
+        # CHANGE 3: We need to check out the main branch
         uses: actions/checkout@v4
 
       - name: Set up Go
@@ -51,6 +56,7 @@ jobs:
         with:
           go-version: '1.22'
 
+      # (The rest of the file is the same)
       - name: Set output names
         id: set_names
         run: |
@@ -66,8 +72,7 @@ jobs:
           echo "archive_ext=${archive_ext}" >> $GITHUB_OUTPUT
 
       - name: Compile Go executable
-        run: |
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -v -o ${{ steps.set_names.outputs.name }}${{ steps.set_names.outputs.ext }} main.go
+        run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -v -o ${{ steps.set_names.outputs.name }}${{ steps.set_names.outputs.ext }} main.go
 
       - name: Package the executable
         id: package

@@ -1,0 +1,91 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  create_release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            Automated release of the web server wrapper.
+            Download the appropriate binary for your platform.
+          draft: false
+          prerelease: false
+
+  build-and-upload:
+    name: Build and Upload
+    needs: create_release # This job runs after create_release is done
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Define the architectures to build for
+        goos: [linux, windows, darwin]
+        goarch: [amd64, arm64]
+        exclude:
+          - goos: windows
+            goarch: arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Set output names
+        id: set_names
+        run: |
+          name="web_server"
+          ext=""
+          archive_ext=".tar.gz"
+          if [ "${{ matrix.goos }}" == "windows" ]; then
+            ext=".exe"
+            archive_ext=".zip"
+          fi
+          echo "name=${name}" >> $GITHUB_OUTPUT
+          echo "ext=${ext}" >> $GITHUB_OUTPUT
+          echo "archive_ext=${archive_ext}" >> $GITHUB_OUTPUT
+
+      - name: Compile Go executable
+        run: |
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -v -o ${{ steps.set_names.outputs.name }}${{ steps.set_names.outputs.ext }} main.go
+
+      - name: Package the executable
+        id: package
+        run: |
+          asset_name="${{ steps.set_names.outputs.name }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ steps.set_names.outputs.archive_ext }}"
+          if [ "${{ matrix.goos }}" == "windows" ]; then
+            zip -r9 "${asset_name}" "${{ steps.set_names.outputs.name }}${{ steps.set_names.outputs.ext }}"
+          else
+            tar -czvf "${asset_name}" "${{ steps.set_names.outputs.name }}${{ steps.set_names.outputs.ext }}"
+          fi
+          echo "asset_name=${asset_name}" >> $GITHUB_OUTPUT
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create_release.outputs.upload_url }}
+          asset_path: ./${{ steps.package.outputs.asset_name }}
+          asset_name: ${{ steps.package.outputs.asset_name }}
+          asset_content_type: application/octet-stream
